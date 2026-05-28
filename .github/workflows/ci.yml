@@ -6,8 +6,6 @@ on:
     paths:
       - 'MLProject/**'
       - 'heart_preprocessing/**'
-  pull_request:
-    branches: [main, master]
   workflow_dispatch:
     inputs:
       n_estimators:
@@ -35,71 +33,23 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
           pip install mlflow==2.19.0 scikit-learn pandas numpy matplotlib seaborn
 
-      - name: Generate preprocessing dataset (if not exists)
+      - name: Train model via MLflow Project
         run: |
-          if [ ! -f "heart_preprocessing/train.csv" ]; then
-            python - <<'EOF'
-          import numpy as np, pandas as pd
-          from sklearn.model_selection import train_test_split
-          from sklearn.preprocessing import StandardScaler
-          import os
-
-          np.random.seed(42)
-          n = 303
-          df = pd.DataFrame({
-              'age': np.random.randint(29, 77, n),
-              'sex': np.random.randint(0, 2, n),
-              'cp': np.random.randint(0, 4, n),
-              'trestbps': np.random.randint(94, 200, n),
-              'chol': np.random.randint(126, 564, n),
-              'fbs': np.random.randint(0, 2, n),
-              'restecg': np.random.randint(0, 3, n),
-              'thalach': np.random.randint(71, 202, n),
-              'exang': np.random.randint(0, 2, n),
-              'oldpeak': np.round(np.random.uniform(0, 6.2, n), 1),
-              'slope': np.random.randint(0, 3, n),
-              'ca': np.random.randint(0, 5, n),
-              'thal': np.random.randint(0, 4, n),
-              'age_group': np.random.randint(0, 4, n),
-              'chol_thalach_ratio': np.random.uniform(0.5, 5, n),
-              'target': np.random.randint(0, 2, n)
-          })
-          X = df.drop('target', axis=1)
-          y = df['target']
-          scaler = StandardScaler()
-          X_scaled = pd.DataFrame(scaler.fit_transform(X), columns=X.columns)
-          X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42, stratify=y)
-          os.makedirs('heart_preprocessing', exist_ok=True)
-          tr = X_train.copy(); tr['target'] = y_train.values
-          te = X_test.copy(); te['target'] = y_test.values
-          tr.to_csv('heart_preprocessing/train.csv', index=False)
-          te.to_csv('heart_preprocessing/test.csv', index=False)
-          print(f"Generated: train={tr.shape}, test={te.shape}")
-          EOF
-          fi
-
-      - name: Run MLflow Project (re-train model)
-        run: |
-          mlflow run MLProject/ \
-            -P n_estimators=${{ github.event.inputs.n_estimators || '200' }} \
-            -P max_depth=${{ github.event.inputs.max_depth || '8' }} \
-            --env-manager=local
+          python MLProject/modelling.py \
+            --n_estimators ${{ github.event.inputs.n_estimators || '200' }} \
+            --max_depth ${{ github.event.inputs.max_depth || '8' }} \
+            --train_path MLProject/heart_preprocessing/train.csv \
+            --test_path MLProject/heart_preprocessing/test.csv
         env:
           MLFLOW_TRACKING_URI: mlruns
-          DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
-          DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
-          DAGSHUB_REPO: ${{ secrets.DAGSHUB_REPO }}
 
-      - name: Upload model artifacts to GitHub
+      - name: Upload model artifacts
         uses: actions/upload-artifact@v4
         with:
           name: model-artifacts-${{ github.run_id }}
-          path: |
-            mlruns/
-            MLProject/mlproject_artifacts/
+          path: mlruns/
           retention-days: 30
 
       - name: Login to Docker Hub
@@ -108,35 +58,25 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build Docker Image (mlflow build-docker)
+      - name: Build and Push Docker Image
         run: |
-          mlflow models build-docker \
-            -m "mlruns/0/$(ls mlruns/0/ | head -1)/artifacts/model" \
-            -n ${{ secrets.DOCKERHUB_USERNAME }}/heart-disease-model:latest \
-            --enable-mlserver
-
-      - name: Push Docker Image to Docker Hub
-        run: |
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/heart-disease-model:latest -f - . <<'EOF'
+          FROM python:3.12-slim
+          WORKDIR /app
+          RUN pip install mlflow==2.19.0 scikit-learn pandas numpy
+          COPY MLProject/ ./MLProject/
+          COPY mlruns/ ./mlruns/ 2>/dev/null || true
+          EXPOSE 5001
+          CMD ["python", "MLProject/modelling.py"]
+          EOF
           docker push ${{ secrets.DOCKERHUB_USERNAME }}/heart-disease-model:latest
-          docker tag ${{ secrets.DOCKERHUB_USERNAME }}/heart-disease-model:latest \
-            ${{ secrets.DOCKERHUB_USERNAME }}/heart-disease-model:${{ github.run_id }}
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/heart-disease-model:${{ github.run_id }}
-
-      - name: Save Docker Hub link
-        run: |
-          echo "https://hub.docker.com/r/${{ secrets.DOCKERHUB_USERNAME }}/heart-disease-model" \
-            > MLProject/docker_hub_link.txt
-          cat MLProject/docker_hub_link.txt
 
       - name: Summary
         run: |
-          echo "## ✅ CI Pipeline Completed" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## CI Pipeline Completed" >> $GITHUB_STEP_SUMMARY
           echo "| Step | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| MLflow re-training | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "| Artifact upload | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "| Docker build | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "| Docker Hub push | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Docker Image: \`docker pull ${{ secrets.DOCKERHUB_USERNAME }}/heart-disease-model:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "| Train Model | Done |" >> $GITHUB_STEP_SUMMARY
+          echo "| Upload Artifacts | Done |" >> $GITHUB_STEP_SUMMARY
+          echo "| Docker Build & Push | Done |" >> $GITHUB_STEP_SUMMARY
+          echo "Docker Image: \`${{ secrets.DOCKERHUB_USERNAME }}/heart-disease-model:latest\`" >> $GITHUB_STEP_SUMMARY
