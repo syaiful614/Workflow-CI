@@ -86,7 +86,7 @@ jobs:
           mlflow run MLProject/ \
             -P n_estimators=${{ github.event.inputs.n_estimators || '200' }} \
             -P max_depth=${{ github.event.inputs.max_depth || '8' }} \
-            --no-conda
+            --env-manager=local
         env:
           MLFLOW_TRACKING_URI: mlruns
           DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
