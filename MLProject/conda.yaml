@@ -1,0 +1,15 @@
+name: heart-disease-mlops
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12.7
+  - pip
+  - pip:
+    - mlflow==2.19.0
+    - scikit-learn>=1.4.0
+    - pandas>=2.0.0
+    - numpy>=1.26.0
+    - matplotlib>=3.8.0
+    - seaborn>=0.13.0
+    - dagshub>=0.3.0
