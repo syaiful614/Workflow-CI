@@ -5,7 +5,6 @@ on:
     branches: [main, master]
     paths:
       - 'MLProject/**'
-      - 'heart_preprocessing/**'
   workflow_dispatch:
     inputs:
       n_estimators:
@@ -35,7 +34,7 @@ jobs:
         run: |
           pip install mlflow==2.19.0 scikit-learn pandas numpy matplotlib seaborn
 
-      - name: Train model via MLflow Project
+      - name: Train model
         run: |
           python MLProject/modelling.py \
             --n_estimators ${{ github.event.inputs.n_estimators || '200' }} \
@@ -58,18 +57,13 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and Push Docker Image
-        run: |
-          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/heart-disease-model:latest -f - . <<'EOF'
-          FROM python:3.12-slim
-          WORKDIR /app
-          RUN pip install mlflow==2.19.0 scikit-learn pandas numpy
-          COPY MLProject/ ./MLProject/
-          COPY mlruns/ ./mlruns/ 2>/dev/null || true
-          EXPOSE 5001
-          CMD ["python", "MLProject/modelling.py"]
-          EOF
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/heart-disease-model:latest
+      - name: Build Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/heart-disease-model:latest
 
       - name: Summary
         run: |
@@ -79,4 +73,4 @@ jobs:
           echo "| Train Model | Done |" >> $GITHUB_STEP_SUMMARY
           echo "| Upload Artifacts | Done |" >> $GITHUB_STEP_SUMMARY
           echo "| Docker Build & Push | Done |" >> $GITHUB_STEP_SUMMARY
-          echo "Docker Image: \`${{ secrets.DOCKERHUB_USERNAME }}/heart-disease-model:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "Docker: \`${{ secrets.DOCKERHUB_USERNAME }}/heart-disease-model:latest\`" >> $GITHUB_STEP_SUMMARY
