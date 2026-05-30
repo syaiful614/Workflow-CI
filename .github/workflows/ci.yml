@@ -34,13 +34,11 @@ jobs:
         run: |
           pip install mlflow==2.19.0 scikit-learn pandas numpy matplotlib seaborn
 
-      - name: Train model
+      - name: Train model with MLflow
         run: |
-          python MLProject/modelling.py \
-            --n_estimators ${{ github.event.inputs.n_estimators || '200' }} \
-            --max_depth ${{ github.event.inputs.max_depth || '8' }} \
-            --train_path MLProject/heart_preprocessing/train.csv \
-            --test_path MLProject/heart_preprocessing/test.csv
+          mlflow run MLProject --env-manager=local \
+            -P n_estimators=${{ github.event.inputs.n_estimators || '200' }} \
+            -P max_depth=${{ github.event.inputs.max_depth || '8' }}
         env:
           MLFLOW_TRACKING_URI: mlruns
 
